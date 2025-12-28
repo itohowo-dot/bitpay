@@ -714,3 +714,91 @@
         (ok proposal-id)
     )
 )
+
+;; Approve admin management proposal
+;; @param proposal-id: ID of the proposal to approve
+;; @returns: (ok true) on success
+;; #[allow(unchecked_data)]
+(define-public (approve-admin-proposal (proposal-id uint))
+    (let (
+            (proposal (unwrap! (map-get? admin-proposals proposal-id)
+                ERR_PROPOSAL_NOT_FOUND
+            ))
+            (current-approvals (get approvals proposal))
+        )
+        ;; Checks
+        (asserts! (is-multisig-admin tx-sender) ERR_UNAUTHORIZED)
+        (asserts! (not (is-in-list tx-sender current-approvals))
+            ERR_ALREADY_APPROVED
+        )
+        (asserts! (not (get executed proposal)) ERR_ALREADY_EXECUTED)
+        (asserts! (< stacks-block-height (get expires-at proposal))
+            ERR_PROPOSAL_EXPIRED
+        )
+
+        ;; Add approval
+        (map-set admin-proposals proposal-id
+            (merge proposal { approvals: (unwrap! (as-max-len? (append current-approvals tx-sender) u10)
+                ERR_INVALID_AMOUNT
+            ) }
+            ))
+
+        (print {
+            event: "treasury-admin-proposal-approved",
+            proposal-id: proposal-id,
+            approver: tx-sender,
+            total-approvals: (+ (len current-approvals) u1),
+        })
+
+        (ok true)
+    )
+)
+
+;; Execute admin management proposal
+;; @param proposal-id: ID of the proposal to execute
+;; @returns: (ok true) on success
+;; #[allow(unchecked_data)]
+(define-public (execute-admin-proposal (proposal-id uint))
+    (let (
+            (proposal (unwrap! (map-get? admin-proposals proposal-id)
+                ERR_PROPOSAL_NOT_FOUND
+            ))
+            (approval-count (len (get approvals proposal)))
+            (action (get action proposal))
+            (target (get target-admin proposal))
+        )
+        ;; Checks
+        (asserts! (not (get executed proposal)) ERR_ALREADY_EXECUTED)
+        (asserts! (>= approval-count REQUIRED_SIGNATURES)
+            ERR_INSUFFICIENT_APPROVALS
+        )
+        (asserts! (< stacks-block-height (get expires-at proposal))
+            ERR_PROPOSAL_EXPIRED
+        )
+
+        ;; Execute action and update counter
+        (if (is-eq action "add")
+            (begin
+                (map-set multisig-admins target true)
+                (var-set active-admin-count (+ (var-get active-admin-count) u1))
+            )
+            (begin
+                (map-delete multisig-admins target)
+                (var-set active-admin-count (- (var-get active-admin-count) u1))
+            )
+        )
+
+        ;; Mark as executed
+        (map-set admin-proposals proposal-id (merge proposal { executed: true }))
+
+        (print {
+            event: "treasury-admin-proposal-executed",
+            proposal-id: proposal-id,
+            action: action,
+            target-admin: target,
+            approvals: approval-count,
+        })
+
+        (ok true)
+    )
+)
