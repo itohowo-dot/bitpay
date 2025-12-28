@@ -150,3 +150,106 @@
         (ok true)
     )
 )
+
+;; Authorize a contract to perform privileged operations
+;; @param contract: Contract principal to authorize
+;; @returns: (ok true) on success
+;; #[allow(unchecked_data)]
+(define-public (authorize-contract (contract principal))
+    (begin
+        ;; Only admins can authorize contracts
+        (asserts! (is-admin tx-sender) ERR_UNAUTHORIZED)
+
+        ;; Grant authorization
+        (map-set authorized-contracts contract true)
+        (print {
+            event: "access-contract-authorized",
+            contract: contract,
+            authorized-by: tx-sender,
+        })
+        (ok true)
+    )
+)
+
+;; Revoke contract authorization
+;; @param contract: Contract principal to revoke authorization from
+;; @returns: (ok true) on success
+;; #[allow(unchecked_data)]
+(define-public (revoke-contract (contract principal))
+    (begin
+        ;; Only admins can revoke contract authorization
+        (asserts! (is-admin tx-sender) ERR_UNAUTHORIZED)
+
+        ;; Revoke authorization
+        (map-delete authorized-contracts contract)
+        (print {
+            event: "access-contract-revoked",
+            contract: contract,
+            revoked-by: tx-sender,
+        })
+        (ok true)
+    )
+)
+
+;; Pause the protocol (emergency function)
+;; Prevents stream creation but allows withdrawals
+;; @returns: (ok true) on success
+;; #[allow(unchecked_data)]
+(define-public (pause-protocol)
+    (begin
+        ;; Only admins can pause
+        (asserts! (is-admin tx-sender) ERR_UNAUTHORIZED)
+
+        ;; Check not already paused
+        (asserts! (not (var-get protocol-paused)) ERR_PAUSED)
+
+        ;; Set paused state
+        (var-set protocol-paused true)
+        (print {
+            event: "access-protocol-paused",
+            paused-by: tx-sender,
+        })
+        (ok true)
+    )
+)
+
+;; Unpause the protocol
+;; @returns: (ok true) on success
+;; #[allow(unchecked_data)]
+(define-public (unpause-protocol)
+    (begin
+        ;; Only admins can unpause
+        (asserts! (is-admin tx-sender) ERR_UNAUTHORIZED)
+
+        ;; Check currently paused
+        (asserts! (var-get protocol-paused) ERR_NOT_PAUSED)
+
+        ;; Set unpaused state
+        (var-set protocol-paused false)
+        (print {
+            event: "access-protocol-unpaused",
+            unpaused-by: tx-sender,
+        })
+        (ok true)
+    )
+)
+
+;; Initiate admin transfer (two-step process for safety)
+;; @param new-admin: Principal to transfer admin role to
+;; @returns: (ok true) on success
+;; #[allow(unchecked_data)]
+(define-public (initiate-admin-transfer (new-admin principal))
+    (begin
+        ;; Only contract owner can initiate transfer
+        (asserts! (is-eq tx-sender CONTRACT_OWNER) ERR_NOT_CONTRACT_OWNER)
+
+        ;; Set pending admin
+        (var-set pending-admin (some new-admin))
+        (print {
+            event: "access-admin-transfer-initiated",
+            from: CONTRACT_OWNER,
+            to: new-admin,
+        })
+        (ok true)
+    )
+)
