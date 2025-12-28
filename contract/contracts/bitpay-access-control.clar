@@ -253,3 +253,55 @@
         (ok true)
     )
 )
+
+;; Accept admin transfer (must be called by pending admin)
+;; @returns: (ok true) on success
+;; #[allow(unchecked_data)]
+(define-public (accept-admin-transfer)
+    (let ((pending (var-get pending-admin)))
+        (begin
+            ;; Check pending admin is set
+            (asserts! (is-some pending) ERR_PENDING_ADMIN_NOT_SET)
+
+            ;; Check caller is the pending admin
+            (asserts! (is-eq tx-sender (unwrap-panic pending))
+                ERR_NOT_PENDING_ADMIN
+            )
+
+            ;; Grant admin role to new admin
+            (map-set admins tx-sender true)
+
+            ;; Clear pending admin
+            (var-set pending-admin none)
+
+            (print {
+                event: "access-admin-transfer-completed",
+                new-admin: tx-sender,
+            })
+            (ok true)
+        )
+    )
+)
+
+;; read only functions
+;;
+
+;; Check if a principal is an admin
+;; @param user: Principal to check
+;; @returns: true if admin, false otherwise
+(define-read-only (is-admin (user principal))
+    (default-to false (map-get? admins user))
+)
+
+;; Check if a principal is an operator
+;; @param user: Principal to check
+;; @returns: true if operator, false otherwise
+(define-read-only (is-operator (user principal))
+    (default-to false (map-get? operators user))
+)
+
+;; Check if protocol is paused
+;; @returns: true if paused, false otherwise
+(define-read-only (is-paused)
+    (var-get protocol-paused)
+)
