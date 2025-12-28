@@ -177,3 +177,59 @@
     err-listing-not-found
   )
 )
+
+;; Public functions
+
+;; List an obligation NFT for sale
+;; @param stream-id: ID of the stream to list
+;; @param price: Asking price in sats
+;; @returns: (ok true) on success
+(define-public (list-nft
+    (stream-id uint)
+    (price uint)
+  )
+  (let (
+      (listing-check (get-listing stream-id))
+      (nft-owner-response (unwrap! (contract-call? .bitpay-obligation-nft-v4 get-owner stream-id)
+        err-invalid-stream
+      ))
+      (nft-owner (unwrap! nft-owner-response err-not-nft-owner))
+    )
+    ;; Validations
+    (asserts! (> price u0) err-invalid-price)
+    (asserts! (is-eq nft-owner tx-sender) err-not-nft-owner)
+    (asserts! (is-none listing-check) err-already-listed)
+    (asserts! (not (is-pending-purchase stream-id)) err-already-pending)
+
+    ;; Create listing
+    (map-set listings stream-id {
+      seller: tx-sender,
+      price: price,
+      listed-at: stacks-block-height,
+      active: true,
+    })
+
+    ;; Update user listings
+    (match (map-get? user-listings tx-sender)
+      existing-listings (map-set user-listings tx-sender
+        (unwrap! (as-max-len? (append existing-listings stream-id) u50)
+          err-not-authorized
+        ))
+      (map-set user-listings tx-sender (list stream-id))
+    )
+
+    ;; Update stats
+    (var-set total-listings (+ (var-get total-listings) u1))
+
+    ;; Emit event
+    (print {
+      event: "market-nft-listed",
+      stream-id: stream-id,
+      seller: tx-sender,
+      price: price,
+      listed-at: stacks-block-height,
+    })
+
+    (ok true)
+  )
+)
