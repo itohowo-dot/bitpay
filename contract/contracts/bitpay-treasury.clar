@@ -530,3 +530,96 @@
                 ERR_INVALID_AMOUNT
             ) }
             ))
+
+            (print {
+            event: "treasury-withdrawal-approved",
+            proposal-id: proposal-id,
+            approver: tx-sender,
+            total-approvals: (+ (len current-approvals) u1),
+            required: REQUIRED_SIGNATURES,
+        })
+
+        (ok true)
+    )
+)
+
+;; Execute withdrawal (once 3 approvals + timelock elapsed)
+;; @param proposal-id: ID of the proposal to execute
+;; @returns: (ok true) on success
+;; #[allow(unchecked_data)]
+(define-public (execute-multisig-withdrawal (proposal-id uint))
+    (let (
+            (proposal (unwrap! (map-get? withdrawal-proposals proposal-id)
+                ERR_PROPOSAL_NOT_FOUND
+            ))
+            (approval-count (len (get approvals proposal)))
+            (timelock-elapsed (+ (get proposed-at proposal) TIMELOCK_BLOCKS))
+            (amount (get amount proposal))
+        )
+        ;; Checks
+        (asserts! (not (get executed proposal)) ERR_ALREADY_EXECUTED)
+        (asserts! (>= approval-count REQUIRED_SIGNATURES)
+            ERR_INSUFFICIENT_APPROVALS
+        )
+        (asserts! (>= stacks-block-height timelock-elapsed)
+            ERR_TIMELOCK_NOT_ELAPSED
+        )
+        (asserts! (< stacks-block-height (get expires-at proposal))
+            ERR_PROPOSAL_EXPIRED
+        )
+
+        ;; Check daily limit
+        (try! (check-daily-limit amount))
+
+        ;; Execute withdrawal
+        (try! (as-contract (contract-call? .bitpay-sbtc-helper-v4 transfer-from-vault amount
+            (get recipient proposal)
+        )))
+
+        ;; Mark as executed
+        (map-set withdrawal-proposals proposal-id
+            (merge proposal { executed: true })
+        )
+
+        ;; Update treasury balance
+        (var-set treasury-balance (- (var-get treasury-balance) amount))
+
+        ;; Update daily limit tracking
+        (update-daily-limit amount)
+
+        (print {
+            event: "treasury-withdrawal-executed",
+            proposal-id: proposal-id,
+            amount: amount,
+            recipient: (get recipient proposal),
+            approvals: approval-count,
+        })
+
+        (ok true)
+    )
+)
+
+;; Check and update daily withdrawal limit
+;; @param amount: Amount to check against daily limit
+;; @returns: (ok true) if within limit
+(define-private (check-daily-limit (amount uint))
+    (let (
+            (current-block stacks-block-height)
+            (last-block (var-get last-withdrawal-block))
+            (blocks-per-day u144)
+        )
+        ;; Reset if new day
+        (if (>= (- current-block last-block) blocks-per-day)
+            (var-set withdrawn-today u0)
+            true
+        )
+
+        ;; Check limit
+        (asserts!
+            (<= (+ (var-get withdrawn-today) amount) DAILY_WITHDRAWAL_LIMIT)
+            ERR_EXCEEDS_DAILY_LIMIT
+        )
+
+        (ok true)
+    )
+)
