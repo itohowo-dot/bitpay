@@ -408,3 +408,44 @@
         u0 ;; Stream not found
     )
 )
+
+;; Get currently vested amount
+;; @param stream-id: ID of the stream
+;; @returns: Vested amount at current block
+(define-read-only (get-vested-amount (stream-id uint))
+    (get-vested-amount-at-block stream-id stacks-block-height)
+)
+
+;; Get amount available to withdraw
+;; @param stream-id: ID of the stream
+;; @returns: (ok available-amount) or error
+(define-read-only (get-withdrawable-amount (stream-id uint))
+    (match (map-get? streams stream-id)
+        stream (let (
+                (vested (get-vested-amount-at-block stream-id stacks-block-height))
+                (withdrawn (get withdrawn stream))
+            )
+            (ok (- vested withdrawn))
+        )
+        ERR_STREAM_NOT_FOUND
+    )
+)
+
+;; Get next stream ID that will be assigned
+;; @returns: Next stream ID
+(define-read-only (get-next-stream-id)
+    (var-get next-stream-id)
+)
+
+;; Check if stream is active (not cancelled and not ended)
+;; @param stream-id: ID of the stream
+;; @returns: true if active, false otherwise
+(define-read-only (is-stream-active (stream-id uint))
+    (match (map-get? streams stream-id)
+        stream (and
+            (not (get cancelled stream))
+            (< stacks-block-height (get end-block stream))
+        )
+        false
+    )
+)
