@@ -446,3 +446,87 @@
         (ok (- gross-amount fee))
     )
 )
+
+;; =============================================================================
+;; MULTI-SIG TREASURY FUNCTIONS (Professional Grade)
+;; =============================================================================
+
+;; ==========================================
+;; WITHDRAWAL PROPOSALS (With Timelock & Limits)
+;; ==========================================
+
+;; Propose a withdrawal (requires 3-of-5 approval + 24h timelock)
+;; @param amount: Amount to withdraw in sats
+;; @param recipient: Principal to receive funds
+;; @param description: Description of withdrawal purpose
+;; @returns: (ok proposal-id) on success
+;; #[allow(unchecked_data)]
+(define-public (propose-multisig-withdrawal
+        (amount uint)
+        (recipient principal)
+        (description (string-ascii 256))
+    )
+    (let (
+            (proposal-id (var-get next-proposal-id))
+            (expiry (+ stacks-block-height PROPOSAL_EXPIRY_BLOCKS))
+        )
+        ;; Only multisig admins can propose
+        (asserts! (is-multisig-admin tx-sender) ERR_UNAUTHORIZED)
+        (asserts! (> amount u0) ERR_INVALID_AMOUNT)
+        (asserts! (<= amount (var-get treasury-balance)) ERR_INSUFFICIENT_BALANCE)
+
+        ;; Create proposal
+        (map-set withdrawal-proposals proposal-id {
+            proposer: tx-sender,
+            amount: amount,
+            recipient: recipient,
+            approvals: (list tx-sender), ;; Proposer auto-approves
+            executed: false,
+            proposed-at: stacks-block-height,
+            expires-at: expiry,
+            description: description,
+        })
+
+        (var-set next-proposal-id (+ proposal-id u1))
+
+        (print {
+            event: "treasury-withdrawal-proposed",
+            proposal-id: proposal-id,
+            amount: amount,
+            recipient: recipient,
+            proposer: tx-sender,
+            description: description,
+            expires-at: expiry,
+        })
+
+        (ok proposal-id)
+    )
+)
+
+;; Approve a withdrawal proposal
+;; @param proposal-id: ID of the proposal to approve
+;; @returns: (ok true) on success
+;; #[allow(unchecked_data)]
+(define-public (approve-multisig-withdrawal (proposal-id uint))
+    (let (
+            (proposal (unwrap! (map-get? withdrawal-proposals proposal-id)
+                ERR_PROPOSAL_NOT_FOUND
+            ))
+            (current-approvals (get approvals proposal))
+        )
+        ;; Checks
+        (asserts! (is-multisig-admin tx-sender) ERR_UNAUTHORIZED)
+        (asserts! (not (is-in-list tx-sender current-approvals))
+            ERR_ALREADY_APPROVED
+        )
+        (asserts! (not (get executed proposal)) ERR_ALREADY_EXECUTED)
+        (asserts! (< stacks-block-height (get expires-at proposal))
+            ERR_PROPOSAL_EXPIRED
+        )
+
+        ;; Add approval
+        (map-set withdrawal-proposals proposal-id
+            (merge proposal { approvals: (unwrap! (as-max-len? (append current-approvals tx-sender) u10)
+                ERR_INVALID_AMOUNT
+            ) }
+            ))
