@@ -233,3 +233,94 @@
     (ok true)
   )
 )
+
+;; Update listing price
+;; @param stream-id: ID of the stream listing to update
+;; @param new-price: New asking price in sats
+;; @returns: (ok true) on success
+(define-public (update-listing-price
+    (stream-id uint)
+    (new-price uint)
+  )
+  (let ((listing (unwrap! (get-listing stream-id) err-listing-not-found)))
+    ;; Validations
+    (asserts! (> new-price u0) err-invalid-price)
+    (asserts! (is-eq (get seller listing) tx-sender) err-not-authorized)
+    (asserts! (get active listing) err-listing-not-found)
+
+    ;; Update listing
+    (map-set listings stream-id (merge listing { price: new-price }))
+
+    ;; Emit event
+    (print {
+      event: "market-listing-price-updated",
+      stream-id: stream-id,
+      seller: tx-sender,
+      old-price: (get price listing),
+      new-price: new-price,
+    })
+
+    (ok true)
+  )
+)
+
+;; Cancel listing
+;; @param stream-id: ID of the stream listing to cancel
+;; @returns: (ok true) on success
+(define-public (cancel-listing (stream-id uint))
+  (let ((listing (unwrap! (get-listing stream-id) err-listing-not-found)))
+    ;; Validations
+    (asserts! (is-eq (get seller listing) tx-sender) err-not-authorized)
+    (asserts! (get active listing) err-listing-not-found)
+    (asserts! (not (is-pending-purchase stream-id)) err-already-pending)
+
+    ;; Deactivate listing
+    (map-set listings stream-id (merge listing { active: false }))
+
+    ;; Emit event
+    (print {
+      event: "market-listing-cancelled",
+      stream-id: stream-id,
+      seller: tx-sender,
+    })
+
+    (ok true)
+  )
+)
+
+;; ========================================
+;; OPTION 1: Direct On-Chain Purchase
+;; ========================================
+
+;; Buy an obligation NFT directly with crypto wallet (atomic transaction)
+;; @param stream-id: ID of the stream to purchase
+;; @returns: (ok sale-id) on success
+(define-public (buy-nft (stream-id uint))
+  (let (
+      (listing (unwrap! (get-listing stream-id) err-listing-not-found))
+      (seller (get seller listing))
+      (price (get price listing))
+      (marketplace-fee (calculate-marketplace-fee price))
+      (seller-proceeds (calculate-seller-proceeds price))
+      (sale-id (var-get total-sales))
+      (treasury-address (unwrap! (contract-call? .bitpay-treasury-v4 get-contract-address)
+        err-payment-failed
+      ))
+    )
+    ;; Validations
+    (asserts! (get active listing) err-listing-inactive)
+    (asserts! (not (is-eq tx-sender seller)) err-not-authorized)
+    (asserts! (not (is-pending-purchase stream-id)) err-already-pending)
+
+    ;; Payment: buyer to seller (minus marketplace fee)
+    (try! (contract-call? 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token
+      transfer seller-proceeds tx-sender seller none
+    ))
+
+    ;; Payment: buyer to treasury (marketplace fee)
+    (try! (contract-call? 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token
+      transfer marketplace-fee tx-sender treasury-address none
+    ))
+
+    ;; Notify treasury to update its accounting
+    (try! (as-contract (contract-call? .bitpay-treasury-v4 collect-marketplace-fee marketplace-fee)))
