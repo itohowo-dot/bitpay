@@ -174,3 +174,91 @@
         )
     )
 )
+
+;; Collect cancellation fee from vault (called by bitpay-core after stream cancellation)
+;; This transfers sBTC from the vault to treasury and updates accounting
+;; @param amount: Amount of cancellation fee to collect from vault
+;; @returns: (ok amount) on success
+;; #[allow(unchecked_data)]
+(define-public (collect-cancellation-fee (amount uint))
+    (begin
+        (try! (check-not-paused))
+        (asserts! (> amount u0) ERR_INVALID_AMOUNT)
+
+        ;; Only authorized contracts (bitpay-core) can collect cancellation fees
+        (try! (contract-call? .bitpay-access-control-v4 assert-authorized-contract
+            contract-caller
+        ))
+
+        ;; Transfer sBTC from vault to this treasury contract
+        (try! (as-contract (contract-call? .bitpay-sbtc-helper-v4 transfer-from-vault amount
+            tx-sender
+        )))
+
+        ;; Update treasury balance
+        (var-set treasury-balance (+ (var-get treasury-balance) amount))
+        (var-set total-fees-collected (+ (var-get total-fees-collected) amount))
+
+        (print {
+            event: "treasury-cancellation-fee-collected",
+            amount: amount,
+            caller: contract-caller,
+            new-balance: (var-get treasury-balance),
+        })
+
+        (ok amount)
+    )
+)
+
+;; Collect marketplace fee (called by bitpay-marketplace after NFT sale)
+;; This updates treasury accounting after receiving marketplace fee payment
+;; NOTE: Payment already sent via direct sBTC transfer, this just updates accounting
+;; @param amount: Amount of marketplace fee received
+;; @returns: (ok amount) on success
+;; #[allow(unchecked_data)]
+(define-public (collect-marketplace-fee (amount uint))
+    (begin
+        (try! (check-not-paused))
+        (asserts! (> amount u0) ERR_INVALID_AMOUNT)
+
+        ;; Only authorized contracts (bitpay-marketplace) can collect marketplace fees
+        (try! (contract-call? .bitpay-access-control-v4 assert-authorized-contract
+            contract-caller
+        ))
+
+        ;; Update treasury balance (sBTC already received via direct transfer)
+        (var-set treasury-balance (+ (var-get treasury-balance) amount))
+        (var-set total-fees-collected (+ (var-get total-fees-collected) amount))
+
+        (print {
+            event: "treasury-marketplace-fee-collected",
+            amount: amount,
+            caller: contract-caller,
+            new-balance: (var-get treasury-balance),
+        })
+
+        (ok amount)
+    )
+)
+
+;; Withdraw from treasury (admin only)
+;; @param amount: Amount to withdraw in sats
+;; @param recipient: Principal to receive funds
+;; @returns: (ok amount) on success
+;; #[allow(unchecked_data)]
+(define-public (withdraw
+        (amount uint)
+        (recipient principal)
+    )
+    (begin
+        (asserts! (is-admin) ERR_UNAUTHORIZED)
+        (asserts! (> amount u0) ERR_INVALID_AMOUNT)
+        (asserts! (<= amount (var-get treasury-balance)) ERR_INSUFFICIENT_BALANCE)
+
+        ;; Transfer from treasury to recipient
+        (try! (as-contract (contract-call? .bitpay-sbtc-helper-v4 transfer-from-vault amount
+            recipient
+        )))
+
+        ;; Update treasury balance
+        (var-set treasury-balance (- (var-get treasury-balance) amount))
