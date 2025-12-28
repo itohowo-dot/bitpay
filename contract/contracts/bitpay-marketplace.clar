@@ -405,3 +405,94 @@
     (ok true)
   )
 )
+
+;; Step 2: Complete purchase after payment confirmed by gateway
+;; Called by authorized backend after webhook confirms payment
+;; @param stream-id: ID of the stream to complete purchase
+;; @param buyer: Principal of the buyer
+;; @param payment-id: Payment identifier to verify
+;; @returns: (ok sale-id) on success
+(define-public (complete-purchase
+    (stream-id uint)
+    (buyer principal)
+    (payment-id (string-ascii 64))
+  )
+  (let (
+      (listing (unwrap! (get-listing stream-id) err-listing-not-found))
+      (pending (unwrap! (get-pending-purchase stream-id) err-no-pending-purchase))
+      (seller (get seller listing))
+      (price (get price listing))
+      (sale-id (var-get total-sales))
+    )
+    ;; Authorization checks
+    (asserts! (is-authorized-backend tx-sender) err-not-authorized)
+    (asserts! (get active listing) err-listing-inactive)
+    (asserts! (is-eq (get buyer pending) buyer) err-buyer-mismatch)
+    (asserts! (is-eq (get payment-id pending) payment-id) err-payment-id-mismatch)
+    (asserts! (< stacks-block-height (get expires-at pending))
+      err-purchase-expired
+    )
+
+    ;; Transfer obligation NFT: seller to buyer
+    (unwrap!
+      (contract-call? .bitpay-obligation-nft-v4 transfer stream-id seller buyer)
+      err-transfer-failed
+    )
+
+    ;; Update stream sender: seller to buyer
+    (unwrap!
+      (as-contract (contract-call? .bitpay-core-v4 update-stream-sender stream-id buyer))
+      err-transfer-failed
+    )
+
+    ;; Deactivate listing and clear pending purchase
+    (map-set listings stream-id (merge listing { active: false }))
+    (map-delete pending-purchases stream-id)
+
+    ;; Record sale
+    (map-set sales-history sale-id {
+      stream-id: stream-id,
+      seller: seller,
+      buyer: buyer,
+      price: price,
+      sold-at: stacks-block-height,
+      payment-id: (some payment-id),
+    })
+
+    ;; Update stats
+    (var-set total-sales (+ sale-id u1))
+    (var-set total-volume (+ (var-get total-volume) price))
+
+    ;; Emit event for chainhook monitoring
+    (print {
+      event: "market-gateway-purchase-completed",
+      stream-id: stream-id,
+      buyer: buyer,
+      seller: seller,
+      price: price,
+      payment-id: payment-id,
+      sale-id: sale-id,
+    })
+
+    (ok sale-id)
+  )
+)
+
+;; Cancel expired pending purchase
+;; Allows cleaning up expired purchase attempts
+;; @param stream-id: ID of the stream with expired purchase
+;; @returns: (ok true) on success
+(define-public (cancel-expired-purchase (stream-id uint))
+  (let ((pending (unwrap! (get-pending-purchase stream-id) err-no-pending-purchase)))
+    (asserts! (>= stacks-block-height (get expires-at pending)) err-not-expired)
+    (map-delete pending-purchases stream-id)
+
+    (print {
+      event: "market-purchase-expired",
+      stream-id: stream-id,
+      buyer: (get buyer pending),
+    })
+
+    (ok true)
+  )
+)
