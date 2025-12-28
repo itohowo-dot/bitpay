@@ -356,3 +356,93 @@
         (ok new-admin)
     )
 )
+
+;; Accept admin transfer (step 2 of 2)
+;; @returns: (ok tx-sender) on success
+;; #[allow(unchecked_data)]
+(define-public (accept-admin-transfer)
+    (let ((pending (var-get pending-admin)))
+        (asserts! (is-some pending) ERR_UNAUTHORIZED)
+        (asserts! (is-eq tx-sender (unwrap-panic pending)) ERR_UNAUTHORIZED)
+
+        (let ((old-admin (var-get admin)))
+            (var-set admin tx-sender)
+            (var-set pending-admin none)
+
+            (print {
+                event: "treasury-admin-transfer-completed",
+                old-admin: old-admin,
+                new-admin: tx-sender,
+            })
+
+            (ok tx-sender)
+        )
+    )
+)
+
+;; Cancel pending admin transfer
+;; @returns: (ok true) on success
+;; #[allow(unchecked_data)]
+(define-public (cancel-admin-transfer)
+    (begin
+        (asserts! (is-admin) ERR_UNAUTHORIZED)
+        (asserts! (is-some (var-get pending-admin)) ERR_INVALID_AMOUNT)
+
+        (var-set pending-admin none)
+
+        (print {
+            event: "treasury-admin-transfer-cancelled",
+            cancelled-by: tx-sender,
+        })
+
+        (ok true)
+    )
+)
+
+;; Read-only functions
+
+;; Get current treasury balance
+;; @returns: (ok balance)
+(define-read-only (get-treasury-balance)
+    (ok (var-get treasury-balance))
+)
+
+;; Get current fee in basis points
+;; @returns: (ok fee-bps)
+(define-read-only (get-fee-bps)
+    (ok (var-get fee-bps))
+)
+
+;; Get total fees collected all-time
+;; @returns: (ok total-fees)
+(define-read-only (get-total-fees-collected)
+    (ok (var-get total-fees-collected))
+)
+
+;; Get current admin
+;; @returns: (ok admin)
+(define-read-only (get-admin)
+    (ok (var-get admin))
+)
+
+;; Get pending admin transfer
+;; @returns: (ok optional-pending-admin)
+(define-read-only (get-pending-admin)
+    (ok (var-get pending-admin))
+)
+
+;; Get total distributed to a recipient
+;; @param recipient: Principal to check
+;; @returns: (ok amount)
+(define-read-only (get-recipient-total (recipient principal))
+    (ok (default-to u0 (map-get? fee-recipients recipient)))
+)
+
+;; Calculate net amount after fee deduction
+;; @param gross-amount: Amount before fee
+;; @returns: (ok net-amount)
+(define-read-only (get-amount-after-fee (gross-amount uint))
+    (let ((fee (unwrap-panic (calculate-fee gross-amount))))
+        (ok (- gross-amount fee))
+    )
+)
