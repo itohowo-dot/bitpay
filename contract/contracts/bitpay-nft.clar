@@ -29,3 +29,44 @@
     uint
     uint
 )
+
+;; SIP-009 required functions
+
+;; Get the last minted token ID
+;; @returns: (ok last-token-id)
+(define-read-only (get-last-token-id)
+    (ok (var-get last-token-id))
+)
+
+;; Get the token URI for metadata
+;; @param token-id: ID of the token
+;; @returns: (ok optional-uri)
+(define-read-only (get-token-uri (token-id uint))
+    (if (> (len (var-get base-token-uri)) u0)
+        (ok (some (var-get base-token-uri)))
+        (ok none)
+    )
+)
+
+;; Get the owner of a token
+;; @param token-id: ID of the token
+;; @returns: (ok optional-owner)
+(define-read-only (get-owner (token-id uint))
+    (ok (nft-get-owner? stream-nft token-id))
+)
+
+;; Transfer is DISABLED - Recipient NFTs are soul-bound (non-transferable)
+;; They serve as proof of receipt and cannot be traded
+;; @param token-id: ID of the token
+;; @param sender: Current owner
+;; @param recipient: Intended recipient
+;; @returns: Always returns ERR_UNAUTHORIZED (transfers disabled)
+;; #[allow(unchecked_data)]
+(define-public (transfer
+        (token-id uint)
+        (sender principal)
+        (recipient principal)
+    )
+    ;; Soul-bound: recipient NFTs cannot be transferred
+    ERR_UNAUTHORIZED
+)
