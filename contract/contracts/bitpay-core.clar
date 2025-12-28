@@ -113,3 +113,100 @@
                     u200
                 ))
             )
+
+            ;; Update recipient's stream list
+            (map-set recipient-streams recipient
+                (unwrap-panic (as-max-len? (append (get-recipient-streams recipient) stream-id)
+                    u200
+                ))
+            )
+
+            ;; Increment stream ID counter
+            (var-set next-stream-id (+ stream-id u1))
+
+            ;; Mint recipient NFT (soul-bound proof of receipt)
+            (try! (contract-call? .bitpay-nft-v4 mint stream-id recipient))
+
+            ;; Mint obligation NFT for sender (transferable payment obligation)
+            (try! (contract-call? .bitpay-obligation-nft-v4 mint stream-id tx-sender))
+
+            (print {
+                event: "stream-created",
+                stream-id: stream-id,
+                sender: tx-sender,
+                recipient: recipient,
+                amount: amount,
+                start-block: start-block,
+                end-block: end-block,
+            })
+
+            (ok stream-id)
+        )
+    )
+)
+
+;; Withdraw vested amount from a stream
+;; @param stream-id: ID of the stream to withdraw from
+;; @returns: (ok withdrawn-amount) on success
+;; #[allow(unchecked_data)]
+(define-public (withdraw-from-stream (stream-id uint))
+    (let (
+            (stream (unwrap! (map-get? streams stream-id) ERR_STREAM_NOT_FOUND))
+            (available (try! (get-withdrawable-amount stream-id)))
+        )
+        (begin
+            ;; Only recipient can withdraw
+            (asserts! (is-eq tx-sender (get recipient stream)) ERR_UNAUTHORIZED)
+
+            ;; Check there's something to withdraw
+            (asserts! (> available u0) ERR_NOTHING_TO_WITHDRAW)
+
+            ;; Transfer from vault to recipient
+            (try! (contract-call? .bitpay-sbtc-helper-v4 transfer-from-vault available
+                tx-sender
+            ))
+
+            ;; Update withdrawn amount
+            (map-set streams stream-id
+                (merge stream { withdrawn: (+ (get withdrawn stream) available) })
+            )
+
+            (print {
+                event: "stream-withdrawal",
+                stream-id: stream-id,
+                recipient: tx-sender,
+                amount: available,
+            })
+
+            (ok available)
+        )
+    )
+)
+
+;; Withdraw a specific amount from a stream (partial withdrawal)
+;; @param stream-id: ID of the stream to withdraw from
+;; @param amount: Amount to withdraw (must be <= available)
+;; @returns: (ok withdrawn-amount) on success
+;; #[allow(unchecked_data)]
+(define-public (withdraw-partial
+        (stream-id uint)
+        (amount uint)
+    )
+    (let (
+            (stream (unwrap! (map-get? streams stream-id) ERR_STREAM_NOT_FOUND))
+            (available (try! (get-withdrawable-amount stream-id)))
+        )
+        (begin
+            ;; Only recipient can withdraw
+            (asserts! (is-eq tx-sender (get recipient stream)) ERR_UNAUTHORIZED)
+
+            ;; Check there's something to withdraw
+            (asserts! (> amount u0) ERR_NOTHING_TO_WITHDRAW)
+
+            ;; Check requested amount doesn't exceed available
+            (asserts! (<= amount available) ERR_INSUFFICIENT_BALANCE)
+
+            ;; Transfer from vault to recipient
+            (try! (contract-call? .bitpay-sbtc-helper-v4 transfer-from-vault amount
+                tx-sender
+            ))
