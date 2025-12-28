@@ -262,3 +262,97 @@
 
         ;; Update treasury balance
         (var-set treasury-balance (- (var-get treasury-balance) amount))
+
+        (print {
+            event: "treasury-withdrawal",
+            amount: amount,
+            recipient: recipient,
+            admin: tx-sender,
+            new-balance: (var-get treasury-balance),
+        })
+
+        (ok amount)
+    )
+)
+
+;; Distribute fees to recipients
+;; @param recipient: Principal to receive distribution
+;; @param amount: Amount to distribute in sats
+;; @returns: (ok amount) on success
+;; #[allow(unchecked_data)]
+(define-public (distribute-to-recipient
+        (recipient principal)
+        (amount uint)
+    )
+    (begin
+        (asserts! (is-admin) ERR_UNAUTHORIZED)
+        (asserts! (> amount u0) ERR_INVALID_AMOUNT)
+        (asserts! (<= amount (var-get treasury-balance)) ERR_INSUFFICIENT_BALANCE)
+
+        ;; Transfer to recipient
+        (try! (as-contract (contract-call? .bitpay-sbtc-helper-v4 transfer-from-vault amount
+            recipient
+        )))
+
+        ;; Update balances
+        (var-set treasury-balance (- (var-get treasury-balance) amount))
+        (map-set fee-recipients recipient
+            (+ (default-to u0 (map-get? fee-recipients recipient)) amount)
+        )
+
+        (print {
+            event: "treasury-distribution",
+            amount: amount,
+            recipient: recipient,
+            admin: tx-sender,
+            new-balance: (var-get treasury-balance),
+        })
+
+        (ok amount)
+    )
+)
+
+;; Update fee percentage (admin only)
+;; @param new-fee-bps: New fee in basis points (max 1000 = 10%)
+;; @returns: (ok new-fee-bps) on success
+;; #[allow(unchecked_data)]
+(define-public (set-fee-bps (new-fee-bps uint))
+    (begin
+        (asserts! (is-admin) ERR_UNAUTHORIZED)
+        (asserts! (<= new-fee-bps u1000) ERR_INVALID_AMOUNT) ;; Max 10% fee
+
+        (let ((old-fee (var-get fee-bps)))
+            (var-set fee-bps new-fee-bps)
+
+            (print {
+                event: "treasury-fee-updated",
+                old-fee-bps: old-fee,
+                new-fee-bps: new-fee-bps,
+                admin: tx-sender,
+            })
+
+            (ok new-fee-bps)
+        )
+    )
+)
+
+;; Propose admin transfer (step 1 of 2)
+;; @param new-admin: Principal to transfer admin role to
+;; @returns: (ok new-admin) on success
+;; #[allow(unchecked_data)]
+(define-public (propose-admin-transfer (new-admin principal))
+    (begin
+        (asserts! (is-admin) ERR_UNAUTHORIZED)
+        (asserts! (not (is-eq new-admin (var-get admin))) ERR_INVALID_AMOUNT)
+
+        (var-set pending-admin (some new-admin))
+
+        (print {
+            event: "treasury-admin-transfer-proposed",
+            current-admin: (var-get admin),
+            proposed-admin: new-admin,
+        })
+
+        (ok new-admin)
+    )
+)
