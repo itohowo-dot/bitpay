@@ -91,3 +91,61 @@
         )
     )
 )
+
+;; Custom functions for obligation NFT integration
+
+;; Mint obligation NFT for a stream (called by bitpay-core)
+;; SECURITY: Only bitpay-core can mint NFTs to prevent fake obligation NFTs
+;; @param stream-id: ID of the stream to link
+;; @param sender: Principal to receive the obligation NFT
+;; @returns: (ok token-id) on success
+;; #[allow(unchecked_data)]
+(define-public (mint
+        (stream-id uint)
+        (sender principal)
+    )
+    (let ((token-id (+ (var-get last-token-id) u1)))
+        ;; Only bitpay-core contract can mint obligation NFTs
+        (asserts! (is-eq contract-caller .bitpay-core-v4) ERR_UNAUTHORIZED)
+
+        (try! (nft-mint? obligation-nft token-id sender))
+        (var-set last-token-id token-id)
+        (map-set token-to-stream token-id stream-id)
+        (map-set stream-to-token stream-id token-id)
+
+        (print {
+            event: "obligation-minted",
+            stream-id: stream-id,
+            token-id: token-id,
+            owner: sender,
+        })
+
+        (ok token-id)
+    )
+)
+
+;; Burn obligation NFT when stream is cancelled or fully paid
+;; @param token-id: ID of the token to burn
+;; @param owner: Current owner of the token
+;; @returns: (ok true) on success
+;; #[allow(unchecked_data)]
+(define-public (burn
+        (token-id uint)
+        (owner principal)
+    )
+    (begin
+        (asserts!
+            (is-eq (some tx-sender) (nft-get-owner? obligation-nft token-id))
+            ERR_NOT_TOKEN_OWNER
+        )
+        ;; Get stream ID before deleting the mapping
+        (match (map-get? token-to-stream token-id)
+            stream-id (begin
+                (map-delete token-to-stream token-id)
+                (map-delete stream-to-token stream-id)
+            )
+            true
+        )
+        (nft-burn? obligation-nft token-id owner)
+    )
+)
