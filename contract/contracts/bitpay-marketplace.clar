@@ -88,3 +88,92 @@
     false
   )
 )
+
+;; Get all listings created by a user
+;; @param user: Principal address
+;; @returns: List of stream IDs listed by user
+(define-read-only (get-user-listings (user principal))
+  (default-to (list) (map-get? user-listings user))
+)
+
+;; Get sale history by sale ID
+;; @param sale-id: ID of the sale
+;; @returns: Optional sale data
+(define-read-only (get-sale-history (sale-id uint))
+  (map-get? sales-history sale-id)
+)
+
+;; Get marketplace statistics
+;; @returns: (ok stats) with total listings, sales, and volume
+(define-read-only (get-marketplace-stats)
+  (ok {
+    total-listings: (var-get total-listings),
+    total-sales: (var-get total-sales),
+    total-volume: (var-get total-volume),
+  })
+)
+
+;; Calculate marketplace fee for a given price
+;; @param price: Sale price in sats
+;; @returns: Fee amount in sats
+(define-read-only (calculate-marketplace-fee (price uint))
+  (/ (* price (var-get marketplace-fee-bps)) u10000)
+)
+
+;; Get current marketplace fee in basis points
+;; @returns: (ok fee-bps)
+(define-read-only (get-marketplace-fee-bps)
+  (ok (var-get marketplace-fee-bps))
+)
+
+;; Calculate seller proceeds after marketplace fee
+;; @param price: Sale price in sats
+;; @returns: Net proceeds to seller in sats
+(define-read-only (calculate-seller-proceeds (price uint))
+  (- price (calculate-marketplace-fee price))
+)
+
+;; Get pending purchase details for a stream
+;; @param stream-id: ID of the stream
+;; @returns: Optional pending purchase data
+(define-read-only (get-pending-purchase (stream-id uint))
+  (map-get? pending-purchases stream-id)
+)
+
+;; Check if a stream has a pending purchase
+;; @param stream-id: ID of the stream
+;; @returns: true if pending purchase exists, false otherwise
+(define-read-only (is-pending-purchase (stream-id uint))
+  (is-some (get-pending-purchase stream-id))
+)
+
+;; Check if a principal is an authorized backend
+;; @param backend: Principal to check
+;; @returns: true if authorized, false otherwise
+(define-read-only (is-authorized-backend (backend principal))
+  (default-to false (map-get? authorized-backends backend))
+)
+
+;; Get count of active listings
+;; @returns: (ok total-listings)
+(define-read-only (get-active-listings-count)
+  (ok (var-get total-listings))
+)
+
+;; Get detailed listing information including fees
+;; @param stream-id: ID of the stream
+;; @returns: (ok listing-details) or error
+(define-read-only (get-listing-details (stream-id uint))
+  (match (get-listing stream-id)
+    listing (ok {
+      stream-id: stream-id,
+      seller: (get seller listing),
+      price: (get price listing),
+      listed-at: (get listed-at listing),
+      active: (get active listing),
+      marketplace-fee: (calculate-marketplace-fee (get price listing)),
+      seller-proceeds: (calculate-seller-proceeds (get price listing)),
+    })
+    err-listing-not-found
+  )
+)
