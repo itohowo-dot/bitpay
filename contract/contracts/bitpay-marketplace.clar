@@ -325,7 +325,7 @@
     ;; Notify treasury to update its accounting
     (try! (as-contract (contract-call? .bitpay-treasury-v4 collect-marketplace-fee marketplace-fee)))
 
-;; Transfer obligation NFT: seller to buyer
+    ;; Transfer obligation NFT: seller to buyer
     (try! (contract-call? .bitpay-obligation-nft-v4 transfer stream-id seller tx-sender))
 
     ;; Update stream sender: seller to buyer
@@ -493,6 +493,59 @@
       buyer: (get buyer pending),
     })
 
+    (ok true)
+  )
+)
+
+;; ========================================
+;; Admin Functions
+;; ========================================
+
+;; Add authorized backend principal
+;; @param backend: Principal to authorize
+;; @returns: (ok true) on success
+;; #[allow(unchecked_data)]
+(define-public (add-authorized-backend (backend principal))
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-not-authorized)
+    (map-set authorized-backends backend true)
+    (print {
+      event: "market-backend-authorized",
+      backend: backend,
+    })
+    (ok true)
+  )
+)
+
+;; Remove authorized backend principal
+;; @param backend: Principal to deauthorize
+;; @returns: (ok true) on success
+;; #[allow(unchecked_data)]
+(define-public (remove-authorized-backend (backend principal))
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-not-authorized)
+    (map-delete authorized-backends backend)
+    (print {
+      event: "market-backend-deauthorized",
+      backend: backend,
+    })
+    (ok true)
+  )
+)
+
+;; Admin function to update marketplace fee
+;; @param new-fee-bps: New fee in basis points (max 1000 = 10%)
+;; @returns: (ok true) on success
+(define-public (set-marketplace-fee (new-fee-bps uint))
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-not-authorized)
+    (asserts! (<= new-fee-bps u1000) err-invalid-price) ;; Max 10% fee
+    (var-set marketplace-fee-bps new-fee-bps)
+    (print {
+      event: "market-marketplace-fee-updated",
+      old-fee: (var-get marketplace-fee-bps),
+      new-fee: new-fee-bps,
+    })
     (ok true)
   )
 )
