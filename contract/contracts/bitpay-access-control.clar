@@ -305,3 +305,68 @@
 (define-read-only (is-paused)
     (var-get protocol-paused)
 )
+
+;; Get contract owner
+;; @returns: Contract owner principal
+(define-read-only (get-contract-owner)
+    CONTRACT_OWNER
+)
+
+;; Get pending admin (if any)
+;; @returns: Optional pending admin principal
+(define-read-only (get-pending-admin)
+    (var-get pending-admin)
+)
+
+;; Check if user has admin or operator role
+;; @param user: Principal to check
+;; @returns: true if has any elevated role
+(define-read-only (has-role (user principal))
+    (or (is-admin user) (is-operator user))
+)
+
+;; Assert protocol is not paused (for use by other contracts)
+;; @returns: (ok true) if not paused, error otherwise
+(define-read-only (assert-not-paused)
+    (if (var-get protocol-paused)
+        ERR_PAUSED
+        (ok true)
+    )
+)
+
+;; Assert caller is admin (for use by other contracts)
+;; @param caller: Principal to check
+;; @returns: (ok true) if admin, error otherwise
+(define-read-only (assert-is-admin (caller principal))
+    (if (is-admin caller)
+        (ok true)
+        ERR_UNAUTHORIZED
+    )
+)
+
+;; Assert caller is admin or operator (for use by other contracts)
+;; @param caller: Principal to check
+;; @returns: (ok true) if has role, error otherwise
+(define-read-only (assert-has-role (caller principal))
+    (if (has-role caller)
+        (ok true)
+        ERR_UNAUTHORIZED
+    )
+)
+
+;; Check if a contract is authorized
+;; @param contract: Principal to check
+;; @returns: true if authorized, false otherwise
+(define-read-only (is-authorized-contract (contract principal))
+    (default-to false (map-get? authorized-contracts contract))
+)
+
+;; Assert contract is authorized (for use by other contracts)
+;; @param contract: Principal to check
+;; @returns: (ok true) if authorized, error otherwise
+(define-read-only (assert-authorized-contract (contract principal))
+    (if (is-authorized-contract contract)
+        (ok true)
+        ERR_UNAUTHORIZED
+    )
+)
