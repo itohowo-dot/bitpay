@@ -48,3 +48,61 @@
     principal
     bool
 )
+
+;; Initialize contract owner as first admin
+(map-set admins CONTRACT_OWNER true)
+
+;; public functions
+;;
+
+;; Add a new admin (only callable by existing admin)
+;; @param new-admin: Principal to grant admin role
+;; @returns: (ok true) on success
+;; #[allow(unchecked_data)]
+(define-public (add-admin (new-admin principal))
+    (begin
+        ;; Only admins can add other admins
+        (asserts! (is-admin tx-sender) ERR_UNAUTHORIZED)
+
+        ;; Check if already an admin
+        (asserts! (not (is-admin new-admin)) ERR_ALREADY_ADMIN)
+
+        ;; Grant admin role
+        (map-set admins new-admin true)
+
+        (print {
+            event: "access-admin-added",
+            admin: new-admin,
+            added-by: tx-sender,
+        })
+
+        (ok true)
+    )
+)
+
+;; Remove an admin (only callable by contract owner or self)
+;; @param admin: Principal to revoke admin role from
+;; @returns: (ok true) on success
+;; #[allow(unchecked_data)]
+(define-public (remove-admin (admin principal))
+    (begin
+        ;; Only contract owner or the admin themselves can remove admin role
+        (asserts! (or (is-eq tx-sender CONTRACT_OWNER) (is-eq tx-sender admin))
+            ERR_NOT_CONTRACT_OWNER
+        )
+
+        ;; Check if target is actually an admin
+        (asserts! (is-admin admin) ERR_NOT_ADMIN)
+
+        ;; Revoke admin role
+        (map-delete admins admin)
+
+        (print {
+            event: "access-admin-removed",
+            admin: admin,
+            removed-by: tx-sender,
+        })
+
+        (ok true)
+    )
+)
