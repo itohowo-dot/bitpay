@@ -47,3 +47,48 @@
         )
     )
 )
+
+;; Transfer sBTC from contract vault to recipient (used for withdrawals)
+;; This releases streamed sBTC from the vault to the recipient
+;; SECURITY: Only authorized contracts (bitpay-core, bitpay-treasury) can call this
+;; @param amount: Amount of sBTC (in sats) to transfer from vault
+;; @param recipient: Principal receiving the sBTC
+;; @returns: (ok true) on success, error on failure
+;; #[allow(unchecked_data)]
+(define-public (transfer-from-vault
+        (amount uint)
+        (recipient principal)
+    )
+    (begin
+        ;; SECURITY CHECK: Only authorized protocol contracts can withdraw from vault
+        ;; This prevents malicious contracts from draining the vault
+        (try! (contract-call? .bitpay-access-control-v4 assert-authorized-contract
+            contract-caller
+        ))
+
+        ;; Validate amount is greater than zero
+        (asserts! (> amount u0) ERR_INVALID_AMOUNT)
+
+        ;; Transfer sBTC from contract vault to recipient
+        ;; Using as-contract to execute transfer from contract's context
+        (match (as-contract (contract-call? 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token
+            transfer amount tx-sender recipient none
+        ))
+            success (ok true)
+            error
+            ERR_SBTC_TRANSFER_FAILED
+        )
+    )
+)
+
+;; read only functions
+;;
+
+;; Get available sBTC balance for a user
+;; @param user: Principal to check balance for
+;; @returns: sBTC balance in sats wrapped in response
+(define-read-only (get-user-balance (user principal))
+    (contract-call? 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token
+        get-balance-available user
+    )
+)
