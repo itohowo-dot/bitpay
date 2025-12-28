@@ -39,3 +39,55 @@
 (define-read-only (get-last-token-id)
     (ok (var-get last-token-id))
 )
+
+;; Get the token URI for metadata
+;; @param token-id: ID of the token
+;; @returns: (ok optional-uri)
+(define-read-only (get-token-uri (token-id uint))
+    (if (> (len (var-get base-token-uri)) u0)
+        (ok (some (var-get base-token-uri)))
+        (ok none)
+    )
+)
+
+;; Get the owner of a token
+;; @param token-id: ID of the token
+;; @returns: (ok optional-owner)
+(define-read-only (get-owner (token-id uint))
+    (ok (nft-get-owner? obligation-nft token-id))
+)
+
+;; Transfer obligation NFT
+;; NOTE: After transferring, the new owner must call bitpay-core.update-stream-sender
+;; to sync the stream sender with the new NFT owner
+;; @param token-id: ID of the token to transfer
+;; @param sender: Current owner
+;; @param recipient: New owner
+;; @returns: (ok true) on success
+;; #[allow(unchecked_data)]
+(define-public (transfer
+        (token-id uint)
+        (sender principal)
+        (recipient principal)
+    )
+    (let ((stream-id (unwrap! (map-get? token-to-stream token-id) ERR_TOKEN_NOT_FOUND)))
+        (begin
+            ;; Verify sender owns the NFT
+            (asserts! (is-eq tx-sender sender) ERR_NOT_TOKEN_OWNER)
+
+            ;; Transfer the NFT
+            (try! (nft-transfer? obligation-nft token-id sender recipient))
+
+            (print {
+                event: "obligation-transferred",
+                stream-id: stream-id,
+                token-id: token-id,
+                from: sender,
+                to: recipient,
+                note: "New owner must call update-stream-sender to complete transfer",
+            })
+
+            (ok true)
+        )
+    )
+)
