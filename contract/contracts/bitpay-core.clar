@@ -51,3 +51,65 @@
     principal ;; sender
     (list 200 uint) ;; list of stream-ids
 )
+
+;; Track user's received streams
+(define-map recipient-streams
+    principal ;; recipient
+    (list 200 uint) ;; list of stream-ids
+)
+
+;; public functions
+;;
+
+;; Create a new payment stream
+;; @param recipient: Principal receiving the stream
+;; @param amount: Total amount of sBTC to stream (in sats)
+;; @param start-block: Block height when streaming starts
+;; @param end-block: Block height when streaming ends
+;; @returns: (ok stream-id) on success
+;; #[allow(unchecked_data)]
+(define-public (create-stream
+        (recipient principal)
+        (amount uint)
+        (start-block uint)
+        (end-block uint)
+    )
+    (let (
+            (stream-id (var-get next-stream-id))
+            (duration (- end-block start-block))
+        )
+        (begin
+            ;; Check protocol not paused
+            (try! (contract-call? .bitpay-access-control-v4 assert-not-paused))
+
+            ;; Validate inputs
+            (asserts! (> amount u0) ERR_INVALID_AMOUNT)
+            (asserts! (not (is-eq recipient tx-sender)) ERR_INVALID_RECIPIENT)
+            (asserts! (>= start-block stacks-block-height)
+                ERR_START_BLOCK_IN_PAST
+            )
+            (asserts! (>= duration MIN_STREAM_DURATION) ERR_INVALID_DURATION)
+
+            ;; Transfer sBTC to vault
+            (try! (contract-call? .bitpay-sbtc-helper-v4 transfer-to-vault amount
+                tx-sender
+            ))
+
+            ;; Create stream record
+            (map-set streams stream-id {
+                sender: tx-sender,
+                recipient: recipient,
+                amount: amount,
+                start-block: start-block,
+                end-block: end-block,
+                withdrawn: u0,
+                cancelled: false,
+                cancelled-at-block: none,
+            })
+
+            ;; Update sender's stream list
+            (map-set sender-streams tx-sender
+                (unwrap-panic (as-max-len? (append (get-sender-streams tx-sender) stream-id)
+                    u200
+                ))
+            )
