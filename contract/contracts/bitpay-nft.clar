@@ -119,3 +119,29 @@
         (nft-burn? stream-nft token-id owner)
     )
 )
+
+;; Get stream ID from token ID
+;; @param token-id: ID of the token
+;; @returns: (ok optional-stream-id)
+(define-read-only (get-stream-id (token-id uint))
+    (ok (map-get? token-to-stream token-id))
+)
+
+;; Get token ID from stream ID
+;; @param stream-id: ID of the stream
+;; @returns: (ok optional-token-id)
+(define-read-only (get-token-id (stream-id uint))
+    (ok (map-get? stream-to-token stream-id))
+)
+
+;; Set base token URI (owner only)
+;; @param uri: Base URI for token metadata
+;; @returns: (ok true) on success
+;; #[allow(unchecked_data)]
+(define-public (set-base-token-uri (uri (string-ascii 256)))
+    (begin
+        (asserts! (is-eq tx-sender CONTRACT_OWNER) ERR_OWNER_ONLY)
+        (var-set base-token-uri uri)
+        (ok true)
+    )
+)
