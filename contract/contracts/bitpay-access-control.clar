@@ -106,3 +106,47 @@
         (ok true)
     )
 )
+
+;; Add an operator
+;; @param new-operator: Principal to grant operator role
+;; @returns: (ok true) on success
+;; #[allow(unchecked_data)]
+(define-public (add-operator (new-operator principal))
+    (begin
+        ;; Only admins can add operators
+        (asserts! (is-admin tx-sender) ERR_UNAUTHORIZED)
+
+        ;; Grant operator role
+        (map-set operators new-operator true)
+
+        (print {
+            event: "access-operator-added",
+            operator: new-operator,
+            added-by: tx-sender,
+        })
+
+        (ok true)
+    )
+)
+
+;; Remove an operator
+;; @param operator: Principal to revoke operator role from
+;; @returns: (ok true) on success
+;; #[allow(unchecked_data)]
+(define-public (remove-operator (operator principal))
+    (begin
+        ;; Only admins can remove operators
+        (asserts! (is-admin tx-sender) ERR_UNAUTHORIZED)
+
+        ;; Revoke operator role
+        (map-delete operators operator)
+
+        (print {
+            event: "access-operator-removed",
+            operator: operator,
+            removed-by: tx-sender,
+        })
+
+        (ok true)
+    )
+)
