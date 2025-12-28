@@ -324,3 +324,84 @@
 
     ;; Notify treasury to update its accounting
     (try! (as-contract (contract-call? .bitpay-treasury-v4 collect-marketplace-fee marketplace-fee)))
+
+;; Transfer obligation NFT: seller to buyer
+    (try! (contract-call? .bitpay-obligation-nft-v4 transfer stream-id seller tx-sender))
+
+    ;; Update stream sender: seller to buyer
+    (try! (as-contract (contract-call? .bitpay-core-v4 update-stream-sender stream-id tx-sender)))
+
+    ;; Deactivate listing
+    (map-set listings stream-id (merge listing { active: false }))
+
+    ;; Record sale
+    (map-set sales-history sale-id {
+      stream-id: stream-id,
+      seller: seller,
+      buyer: tx-sender,
+      price: price,
+      sold-at: stacks-block-height,
+      payment-id: none,
+    })
+
+    ;; Update stats
+    (var-set total-sales (+ sale-id u1))
+    (var-set total-volume (+ (var-get total-volume) price))
+
+    ;; Emit event
+    (print {
+      event: "market-direct-purchase-completed",
+      stream-id: stream-id,
+      buyer: tx-sender,
+      seller: seller,
+      price: price,
+      sale-id: sale-id,
+    })
+
+    (ok sale-id)
+  )
+)
+
+;; ========================================
+;; OPTION 2: Gateway-Assisted Purchase
+;; ========================================
+
+;; Step 1: Initiate purchase through payment gateway
+;; Called by buyer when they start checkout on external gateway
+;; @param stream-id: ID of the stream to purchase
+;; @param payment-id: Unique payment identifier from gateway
+;; @returns: (ok true) on success
+;; #[allow(unchecked_data)]
+(define-public (initiate-purchase
+    (stream-id uint)
+    (payment-id (string-ascii 64))
+  )
+  (let (
+      (listing (unwrap! (get-listing stream-id) err-listing-not-found))
+      (expiry (+ stacks-block-height u1008)) ;; ~1 week expiry (144 blocks/day * 7)
+    )
+    ;; Validations
+    (asserts! (get active listing) err-listing-inactive)
+    (asserts! (not (is-eq tx-sender (get seller listing))) err-not-authorized)
+    (asserts! (not (is-pending-purchase stream-id)) err-already-pending)
+
+    ;; Create pending purchase record
+    (map-set pending-purchases stream-id {
+      buyer: tx-sender,
+      payment-id: payment-id,
+      initiated-at: stacks-block-height,
+      expires-at: expiry,
+    })
+
+    ;; Emit event for monitoring
+    (print {
+      event: "market-purchase-initiated",
+      stream-id: stream-id,
+      buyer: tx-sender,
+      payment-id: payment-id,
+      expires-at: expiry,
+    })
+
+    (ok true)
+  )
+)
