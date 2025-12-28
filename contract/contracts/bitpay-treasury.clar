@@ -89,3 +89,88 @@
 (define-private (is-admin)
     (is-eq tx-sender (var-get admin))
 )
+
+;; Check if a user is a multisig admin
+;; @param user: Principal to check
+;; @returns: true if user is multisig admin
+(define-private (is-multisig-admin (user principal))
+    (default-to false (map-get? multisig-admins user))
+)
+
+;; Check if caller is either multisig admin or legacy admin
+;; @returns: true if caller has admin privileges
+(define-private (is-multisig-admin-or-legacy)
+    (or (is-multisig-admin tx-sender) (is-admin))
+)
+
+;; Helper: Check if principal is in approval list
+;; @param item: Principal to search for
+;; @param lst: List of principals
+;; @returns: true if item is in list
+(define-private (is-in-list
+        (item principal)
+        (lst (list 10 principal))
+    )
+    (is-some (index-of? lst item))
+)
+
+;; Helper: Count active multisig admins
+;; @returns: (ok admin-count)
+(define-read-only (count-admins)
+    (ok (var-get active-admin-count))
+)
+
+;; Helper: Get total available admin slots
+;; @returns: (ok total-slots)
+(define-read-only (get-total-admin-slots)
+    (ok TOTAL_ADMIN_SLOTS)
+)
+
+;; Check if protocol is paused via access-control
+;; @returns: (ok true) if not paused, error if paused
+(define-private (check-not-paused)
+    (let ((paused-check (contract-call? .bitpay-access-control-v4 is-paused)))
+        (asserts! (not paused-check) ERR_PAUSED)
+        (ok true)
+    )
+)
+
+;; Calculate fee amount based on basis points
+;; @param amount: Gross amount to calculate fee on
+;; @returns: (ok fee-amount)
+(define-read-only (calculate-fee (amount uint))
+    (let ((fee (/ (* amount (var-get fee-bps)) u10000)))
+        (ok fee)
+    )
+)
+
+;; Collect fee from a stream (called by bitpay-core)
+;; @param amount: Amount to collect as fee
+;; @returns: (ok fee-amount) on success
+;; #[allow(unchecked_data)]
+(define-public (collect-fee (amount uint))
+    (begin
+        (try! (check-not-paused))
+        (asserts! (> amount u0) ERR_INVALID_AMOUNT)
+
+        (let ((fee (unwrap-panic (calculate-fee amount))))
+            ;; Transfer fee from sender to treasury
+            (try! (contract-call? .bitpay-sbtc-helper-v4 transfer-to-vault fee
+                tx-sender
+            ))
+
+            ;; Update treasury balance
+            (var-set treasury-balance (+ (var-get treasury-balance) fee))
+            (var-set total-fees-collected (+ (var-get total-fees-collected) fee))
+
+            (print {
+                event: "treasury-fee-collected",
+                amount: fee,
+                caller: tx-sender,
+                new-balance: (var-get treasury-balance),
+            })
+
+            (ok fee)
+        )
+    )
+)
