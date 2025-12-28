@@ -1,0 +1,23 @@
+{
+  "chain": "stacks",
+  "uuid": "bitpay-obligation-nft-events",
+  "name": "BitPay Obligation NFT Events",
+  "version": 1,
+  "networks": {
+    "testnet": {
+      "start_block": 2602000,
+      "decode_clarity_values": true,
+      "if_this": {
+        "scope": "print_event",
+        "contract_identifier": "ST2F3J1PK46D6XVRBB9SQ66PY89P8G0EBDW5E05M7.bitpay-obligation-nft-v3",
+        "contains": "obligation-"
+      },
+      "then_that": {
+        "http_post": {
+          "url": "http://localhost:3000/api/webhooks/chainhook/nft",
+          "authorization_header": "Bearer 72f5bcf6ed4419513b1120b07be57703d25bea704cab935b161838b883bb4a8a"
+        }
+      }
+    }
+  }
+}
