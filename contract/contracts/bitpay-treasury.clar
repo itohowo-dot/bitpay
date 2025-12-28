@@ -531,7 +531,7 @@
             ) }
             ))
 
-            (print {
+        (print {
             event: "treasury-withdrawal-approved",
             proposal-id: proposal-id,
             approver: tx-sender,
@@ -801,4 +801,55 @@
 
         (ok true)
     )
+)
+
+;; ==========================================
+;; READ-ONLY FUNCTIONS (Query Multi-Sig State)
+;; ==========================================
+
+;; Get withdrawal proposal details
+;; @param proposal-id: ID of the proposal
+;; @returns: (ok optional-proposal)
+(define-read-only (get-withdrawal-proposal (proposal-id uint))
+    (ok (map-get? withdrawal-proposals proposal-id))
+)
+
+;; Get admin management proposal details
+;; @param proposal-id: ID of the proposal
+;; @returns: (ok optional-proposal)
+(define-read-only (get-admin-proposal (proposal-id uint))
+    (ok (map-get? admin-proposals proposal-id))
+)
+
+;; Check if a user is a multisig admin
+;; @param user: Principal to check
+;; @returns: (ok is-admin)
+(define-read-only (is-multisig-admin-check (user principal))
+    (ok (is-multisig-admin user))
+)
+
+;; Get multisig configuration parameters
+;; @returns: (ok config)
+(define-read-only (get-multisig-config)
+    (ok {
+        required-signatures: REQUIRED_SIGNATURES,
+        total-slots: TOTAL_ADMIN_SLOTS,
+        timelock-blocks: TIMELOCK_BLOCKS,
+        proposal-expiry-blocks: PROPOSAL_EXPIRY_BLOCKS,
+        daily-limit: DAILY_WITHDRAWAL_LIMIT,
+        withdrawn-today: (var-get withdrawn-today),
+        last-withdrawal-block: (var-get last-withdrawal-block),
+    })
+)
+
+;; Get next proposal ID
+;; @returns: (ok next-id)
+(define-read-only (get-next-proposal-id)
+    (ok (var-get next-proposal-id))
+)
+
+;; Get this contract's address (for receiving payments)
+;; @returns: (ok contract-address)
+(define-read-only (get-contract-address)
+    (ok (as-contract tx-sender))
 )
