@@ -303,3 +303,108 @@
         )
     )
 )
+
+;; Update stream sender when obligation NFT is transferred
+;; SECURITY: Only current stream sender can call this (must own obligation NFT before transferring it)
+;; The caller should be the OLD sender who is transferring the obligation
+;; @param stream-id: ID of the stream
+;; @param new-sender: New sender (obligation holder)
+;; @returns: (ok true) on success
+;; #[allow(unchecked_data)]
+(define-public (update-stream-sender
+        (stream-id uint)
+        (new-sender principal)
+    )
+    (let ((stream (unwrap! (map-get? streams stream-id) ERR_STREAM_NOT_FOUND)))
+        (begin
+            ;; Verify caller is EITHER:
+            ;; 1. Current stream sender (for direct transfers), OR
+            ;; 2. Authorized contract (for marketplace/protocol transfers)
+            (asserts!
+                (or
+                    (is-eq tx-sender (get sender stream))
+                    (is-ok (contract-call? .bitpay-access-control-v4
+                        assert-authorized-contract contract-caller
+                    ))
+                )
+                ERR_UNAUTHORIZED
+            )
+
+            ;; Cannot update sender of cancelled stream
+            (asserts! (not (get cancelled stream)) ERR_STREAM_CANCELLED)
+
+            ;; Update the sender (obligation holder)
+            (map-set streams stream-id (merge stream { sender: new-sender }))
+
+            (print {
+                event: "stream-sender-updated",
+                stream-id: stream-id,
+                old-sender: (get sender stream),
+                new-sender: new-sender,
+                transfer-type: (if (is-eq tx-sender (get sender stream))
+                    "direct"
+                    "authorized-contract"
+                ),
+            })
+
+            (ok true)
+        )
+    )
+)
+
+;; read only functions
+;;
+
+;; Get stream details
+;; @param stream-id: ID of the stream
+;; @returns: Optional stream data
+(define-read-only (get-stream (stream-id uint))
+    (map-get? streams stream-id)
+)
+
+;; Get list of streams created by a sender
+;; @param sender: Principal address
+;; @returns: List of stream IDs
+(define-read-only (get-sender-streams (sender principal))
+    (default-to (list) (map-get? sender-streams sender))
+)
+
+;; Get list of streams received by a recipient
+;; @param recipient: Principal address
+;; @returns: List of stream IDs
+(define-read-only (get-recipient-streams (recipient principal))
+    (default-to (list) (map-get? recipient-streams recipient))
+)
+
+;; Calculate vested amount at a specific block
+;; @param stream-id: ID of the stream
+;; @param block-height-value: Block height to calculate vesting at
+;; @returns: Vested amount in sats
+(define-read-only (get-vested-amount-at-block
+        (stream-id uint)
+        (block-height-value uint)
+    )
+    (match (map-get? streams stream-id)
+        stream
+        (let (
+                (start (get start-block stream))
+                (end (get end-block stream))
+                (amount (get amount stream))
+                (duration (- end start))
+            )
+            ;; Before start: nothing vested
+            (if (< block-height-value start)
+                u0
+                ;; After end or cancelled: everything vested
+                (if (or (>= block-height-value end) (get cancelled stream))
+                    amount
+                    ;; During stream: linear vesting
+                    (let ((elapsed (- block-height-value start)))
+                        (/ (* amount elapsed) duration)
+                    )
+                )
+            )
+        )
+        u0 ;; Stream not found
+    )
+)
