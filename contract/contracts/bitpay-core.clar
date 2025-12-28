@@ -210,3 +210,96 @@
             (try! (contract-call? .bitpay-sbtc-helper-v4 transfer-from-vault amount
                 tx-sender
             ))
+
+            ;; Update withdrawn amount
+            (map-set streams stream-id
+                (merge stream { withdrawn: (+ (get withdrawn stream) amount) })
+            )
+
+            (print {
+                event: "stream-withdrawal",
+                stream-id: stream-id,
+                recipient: tx-sender,
+                amount: amount,
+            })
+
+            (ok amount)
+        )
+    )
+)
+
+;; Cancel a stream and return unvested funds to sender (minus cancellation fee)
+;; A 1% cancellation fee is charged on unvested amount to discourage frivolous cancellations
+;; @param stream-id: ID of the stream to cancel
+;; @returns: (ok true) on success
+;; #[allow(unchecked_data)]
+(define-public (cancel-stream (stream-id uint))
+    (let (
+            (stream (unwrap! (map-get? streams stream-id) ERR_STREAM_NOT_FOUND))
+            (vested (get-vested-amount-at-block stream-id stacks-block-height))
+            (already-withdrawn (get withdrawn stream))
+            (unvested (- (get amount stream) vested))
+            (owed-to-recipient (- vested already-withdrawn))
+            ;; Calculate cancellation fee (charged on unvested amount)
+            (cancellation-fee (/ (* unvested CANCELLATION_FEE_BPS) u10000))
+            (unvested-after-fee (- unvested cancellation-fee))
+        )
+        (begin
+            ;; Only sender can cancel
+            (asserts! (is-eq tx-sender (get sender stream)) ERR_UNAUTHORIZED)
+
+            ;; Check not already cancelled
+            (asserts! (not (get cancelled stream)) ERR_STREAM_ALREADY_CANCELLED)
+
+            ;; Transfer cancellation fee to treasury and update accounting
+            (if (> cancellation-fee u0)
+                (begin
+                    ;; 1. Transfer sBTC from vault to treasury contract via helper
+                    ;; The treasury contract will receive the sBTC in its own balance
+                    (try! (contract-call? .bitpay-treasury-v4 collect-cancellation-fee
+                        cancellation-fee
+                    ))
+                    true
+                )
+                true
+            )
+
+            ;; Transfer unvested (minus fee) back to sender
+            (if (> unvested-after-fee u0)
+                (try! (contract-call? .bitpay-sbtc-helper-v4 transfer-from-vault
+                    unvested-after-fee tx-sender
+                ))
+                true
+            )
+
+            ;; Transfer owed amount to recipient
+            (if (> owed-to-recipient u0)
+                (try! (contract-call? .bitpay-sbtc-helper-v4 transfer-from-vault
+                    owed-to-recipient (get recipient stream)
+                ))
+                true
+            )
+
+            ;; Mark stream as cancelled
+            (map-set streams stream-id
+                (merge stream {
+                    cancelled: true,
+                    cancelled-at-block: (some stacks-block-height),
+                    withdrawn: (get amount stream), ;; Mark all as withdrawn
+                })
+            )
+
+            (print {
+                event: "stream-cancelled",
+                stream-id: stream-id,
+                sender: tx-sender,
+                unvested-returned: unvested-after-fee,
+                cancellation-fee: cancellation-fee,
+                vested-paid: owed-to-recipient,
+                cancelled-at-block: stacks-block-height,
+            })
+
+            (ok true)
+        )
+    )
+)
