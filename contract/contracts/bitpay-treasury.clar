@@ -623,3 +623,94 @@
         (ok true)
     )
 )
+
+;; Update daily withdrawal limit tracking
+;; @param amount: Amount withdrawn
+;; @returns: true
+(define-private (update-daily-limit (amount uint))
+    (begin
+        (var-set withdrawn-today (+ (var-get withdrawn-today) amount))
+        (var-set last-withdrawal-block stacks-block-height)
+        true
+    )
+)
+
+;; ==========================================
+;; ADMIN MANAGEMENT (Add/Remove via Multi-Sig)
+;; ==========================================
+
+;; Propose adding a new admin
+;; @param new-admin: Principal to add as admin
+;; @returns: (ok proposal-id) on success
+;; #[allow(unchecked_data)]
+(define-public (propose-add-admin (new-admin principal))
+    (let (
+            (proposal-id (var-get next-proposal-id))
+            (expiry (+ stacks-block-height PROPOSAL_EXPIRY_BLOCKS))
+        )
+        ;; Checks
+        (asserts! (is-multisig-admin tx-sender) ERR_UNAUTHORIZED)
+        (asserts! (not (is-multisig-admin new-admin)) ERR_ALREADY_ADMIN)
+
+        ;; Create proposal
+        (map-set admin-proposals proposal-id {
+            proposer: tx-sender,
+            action: "add",
+            target-admin: new-admin,
+            approvals: (list tx-sender),
+            executed: false,
+            proposed-at: stacks-block-height,
+            expires-at: expiry,
+        })
+
+        (var-set next-proposal-id (+ proposal-id u1))
+
+        (print {
+            event: "treasury-add-admin-proposed",
+            proposal-id: proposal-id,
+            new-admin: new-admin,
+            proposer: tx-sender,
+        })
+
+        (ok proposal-id)
+    )
+)
+
+;; Propose removing an admin
+;; @param target-admin: Principal to remove from admin list
+;; @returns: (ok proposal-id) on success
+;; #[allow(unchecked_data)]
+(define-public (propose-remove-admin (target-admin principal))
+    (let (
+            (proposal-id (var-get next-proposal-id))
+            (expiry (+ stacks-block-height PROPOSAL_EXPIRY_BLOCKS))
+        )
+        ;; Checks
+        (asserts! (is-multisig-admin tx-sender) ERR_UNAUTHORIZED)
+        (asserts! (is-multisig-admin target-admin) ERR_NOT_ADMIN)
+        (asserts! (not (is-eq target-admin tx-sender)) ERR_UNAUTHORIZED)
+        ;; Can't remove self
+
+        ;; Create proposal
+        (map-set admin-proposals proposal-id {
+            proposer: tx-sender,
+            action: "remove",
+            target-admin: target-admin,
+            approvals: (list tx-sender),
+            executed: false,
+            proposed-at: stacks-block-height,
+            expires-at: expiry,
+        })
+
+        (var-set next-proposal-id (+ proposal-id u1))
+
+        (print {
+            event: "treasury-remove-admin-proposed",
+            proposal-id: proposal-id,
+            target-admin: target-admin,
+            proposer: tx-sender,
+        })
+
+        (ok proposal-id)
+    )
+)
